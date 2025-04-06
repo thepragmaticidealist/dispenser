@@ -7,9 +7,10 @@
 #define SS_PIN       53 
 #define GREEN_LED    46
 #define RED_LED      47
+#define BUZZER_PIN   45
 #define MAX_CARDS    10  // Maximum number of unique cards to track
 #define MAX_READS    3   // Default maximum valid reads per card (can be edited)
-#define TIMEOUT_MIN  5   // Timeout in minutes to reset read counts
+#define TIMEOUT_MIN  0.5   // Timeout in minutes to reset read counts
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12); // LCD connected to digital pins
@@ -18,6 +19,22 @@ String cardUUIDs[MAX_CARDS];  // Array to store UUIDs
 int cardReadCounts[MAX_CARDS] = {0}; // Array to track read counts
 int maxReadsPerCard[MAX_CARDS]; // Array to allow setting max reads per card
 unsigned long lastReadTime[MAX_CARDS] = {0}; // Store last read timestamps
+unsigned long lastIdleMessageTime = 0;
+const unsigned long idleMessageInterval = 3000; // Show idle message every 3 seconds
+
+void scrollLCD(String line1, String line2, int delayTime = 300) {
+    int maxLength = max(line1.length(), line2.length());
+    for (int i = 0; i <= maxLength; i++) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        if (i < line1.length())
+            lcd.print(line1.substring(i));
+        lcd.setCursor(0, 1);
+        if (i < line2.length())
+            lcd.print(line2.substring(i));
+        delay(delayTime);
+    }
+}
 
 void setup() {
     Serial.begin(9600);  // Initialize serial communications with the PC
@@ -27,19 +44,12 @@ void setup() {
 
     pinMode(GREEN_LED, OUTPUT);
     pinMode(RED_LED, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
 
     lcd.begin(16, 2);
     lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Please scan your");
-    lcd.setCursor(0, 1);
-    lcd.print("card to get item");
-    delay(3000);
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Hold tag for 3s");
-    lcd.setCursor(0, 1);
-    lcd.print("to scan item");
+    scrollLCD("Please scan your", "card to get item");
+    scrollLCD("Hold tag for 3s", "to scan");
 
     Serial.println(F("Scan PICC to see UID..."));
 }
@@ -47,7 +57,15 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis();
 
-    // Reset read counts if timeout has passed
+    // Show idle message every 3 seconds if no card is being scanned
+    if (!mfrc522.PICC_IsNewCardPresent()) {
+        if (currentMillis - lastIdleMessageTime >= idleMessageInterval) {
+            scrollLCD("Hold tag for 3s", "to scan item");
+            lastIdleMessageTime = currentMillis;
+        }
+        return;
+    }
+
     for (int i = 0; i < MAX_CARDS; i++) {
         if (cardUUIDs[i] != "" && (currentMillis - lastReadTime[i]) > (TIMEOUT_MIN * 60000)) {
             cardReadCounts[i] = 0;
@@ -55,107 +73,80 @@ void loop() {
         }
     }
 
-    // Reset the loop if no new card present on the sensor/reader
-    if (!mfrc522.PICC_IsNewCardPresent()) {
-        return;
-    }
-
-    // Select one of the cards
     if (!mfrc522.PICC_ReadCardSerial()) {
         digitalWrite(RED_LED, HIGH);
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Please hold your");
-        lcd.setCursor(0, 1);
-        lcd.print("tag for 3 sec");
+        digitalWrite(BUZZER_PIN, HIGH);
+        scrollLCD("Please hold your", "tag for 3 sec");
         Serial.println("Error reading card.");
         delay(2000);
         digitalWrite(RED_LED, LOW);
+        digitalWrite(BUZZER_PIN, LOW);
         return;
     }
 
-    // Store the UUID in a variable
     String uuid = "";
     for (byte i = 0; i < mfrc522.uid.size; i++) {
-        if (i > 0) uuid += "-"; // Add separator between bytes
+        if (i > 0) uuid += "-";
         uuid += String(mfrc522.uid.uidByte[i], HEX);
     }
 
-    // Check if UUID already exists in the list
     int index = -1;
     for (int i = 0; i < MAX_CARDS; i++) {
         if (cardUUIDs[i] == uuid) {
             index = i;
             break;
-        } else if (cardUUIDs[i] == "") { // Store new UUID if there's an empty slot
+        } else if (cardUUIDs[i] == "") {
             cardUUIDs[i] = uuid;
             cardReadCounts[i] = 0;
-            maxReadsPerCard[i] = MAX_READS; // Set default max reads per card
+            maxReadsPerCard[i] = MAX_READS;
             lastReadTime[i] = currentMillis;
             index = i;
             break;
         }
     }
 
-    // If we found or added the card, increment its count
     if (index != -1) {
         lastReadTime[index] = currentMillis;
         cardReadCounts[index]++;
         if (cardReadCounts[index] > maxReadsPerCard[index]) {
             Serial.println("That's enough for the day");
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("You've already");
-            lcd.setCursor(0, 1);
-            lcd.print("scanned max today");
+            scrollLCD("You've already", "scanned max today");
             digitalWrite(RED_LED, HIGH);
+            digitalWrite(BUZZER_PIN, HIGH);
             delay(2000);
             digitalWrite(RED_LED, LOW);
+            digitalWrite(BUZZER_PIN, LOW);
             return;
         }
     } else {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("We're having");
-        lcd.setCursor(0, 1);
-        lcd.print("trouble reading");
+        scrollLCD("We're having", "trouble reading");
         digitalWrite(RED_LED, HIGH);
+        digitalWrite(BUZZER_PIN, HIGH);
         delay(2000);
         digitalWrite(RED_LED, LOW);
+        digitalWrite(BUZZER_PIN, LOW);
         return;
     }
 
-    // Turn on the green LED if the card is read successfully
     digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
 
-    // Print the UUID
     Serial.print("UUID: ");
     Serial.println(uuid);
 
-    // Show LCD success message with marquee effect
-    lcd.clear();
-    String message = "Scanned " + String(cardReadCounts[index]) + " times today";
-    for (int i = 0; i < message.length(); i++) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Your card has");
-        lcd.setCursor(0, 1);
-        lcd.print(message.substring(i));
-        delay(300);
-    }
+    String msgLine1 = "Your card has";
+    String msgLine2 = "Scanned " + String(cardReadCounts[index]) + " times today";
+    scrollLCD(msgLine1, msgLine2);
+    digitalWrite(GREEN_LED, LOW);
 
     delay(3000);
     lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Hold tag for 3s");
-    lcd.setCursor(0, 1);
-    lcd.print("to scan item");
+    scrollLCD("Hold tag for 3s", "to scan item");
 
-    digitalWrite(GREEN_LED, LOW);
-    mfrc522.PICC_HaltA(); // Halt the current card
+    digitalWrite(BUZZER_PIN, LOW);
+    mfrc522.PICC_HaltA();
 }
 
-// Function to manually edit the max read count for a specific card
 void setMaxReads(String uuid, int maxReads) {
     for (int i = 0; i < MAX_CARDS; i++) {
         if (cardUUIDs[i] == uuid) {
