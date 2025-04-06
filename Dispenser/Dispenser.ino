@@ -7,10 +7,9 @@
 #define SS_PIN       53 
 #define GREEN_LED    46
 #define RED_LED      47
-#define BUZZER_PIN   45
 #define MAX_CARDS    10  // Maximum number of unique cards to track
 #define MAX_READS    3   // Default maximum valid reads per card (can be edited)
-#define TIMEOUT_MIN  0.5   // Timeout in minutes to reset read counts
+#define TIMEOUT_MIN  5   // Timeout in minutes to reset read counts
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12); // LCD connected to digital pins
@@ -22,7 +21,7 @@ unsigned long lastReadTime[MAX_CARDS] = {0}; // Store last read timestamps
 unsigned long lastIdleMessageTime = 0;
 const unsigned long idleMessageInterval = 3000; // Show idle message every 3 seconds
 
-void scrollLCD(String line1, String line2, int delayTime = 300) {
+void scrollLCD(String line1, String line2, int delayTime = 200) {
     int maxLength = max(line1.length(), line2.length());
     for (int i = 0; i <= maxLength; i++) {
         lcd.clear();
@@ -44,12 +43,12 @@ void setup() {
 
     pinMode(GREEN_LED, OUTPUT);
     pinMode(RED_LED, OUTPUT);
-    pinMode(BUZZER_PIN, OUTPUT);
 
     lcd.begin(16, 2);
     lcd.clear();
     scrollLCD("Please scan your", "card to get item");
-    scrollLCD("Hold tag for 3s", "to scan");
+    scrollLCD("Please scan your", "card to get item");
+    scrollLCD("Hold tag for 3s", "to scan item");
 
     Serial.println(F("Scan PICC to see UID..."));
 }
@@ -75,12 +74,10 @@ void loop() {
 
     if (!mfrc522.PICC_ReadCardSerial()) {
         digitalWrite(RED_LED, HIGH);
-        digitalWrite(BUZZER_PIN, HIGH);
         scrollLCD("Please hold your", "tag for 3 sec");
         Serial.println("Error reading card.");
         delay(2000);
         digitalWrite(RED_LED, LOW);
-        digitalWrite(BUZZER_PIN, LOW);
         return;
     }
 
@@ -112,24 +109,19 @@ void loop() {
             Serial.println("That's enough for the day");
             scrollLCD("You've already", "scanned max today");
             digitalWrite(RED_LED, HIGH);
-            digitalWrite(BUZZER_PIN, HIGH);
             delay(2000);
             digitalWrite(RED_LED, LOW);
-            digitalWrite(BUZZER_PIN, LOW);
             return;
         }
     } else {
         scrollLCD("We're having", "trouble reading");
         digitalWrite(RED_LED, HIGH);
-        digitalWrite(BUZZER_PIN, HIGH);
         delay(2000);
         digitalWrite(RED_LED, LOW);
-        digitalWrite(BUZZER_PIN, LOW);
         return;
     }
 
     digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(BUZZER_PIN, HIGH);
 
     Serial.print("UUID: ");
     Serial.println(uuid);
@@ -137,13 +129,14 @@ void loop() {
     String msgLine1 = "Your card has";
     String msgLine2 = "Scanned " + String(cardReadCounts[index]) + " times today";
     scrollLCD(msgLine1, msgLine2);
+
+    delay(2000);
     digitalWrite(GREEN_LED, LOW);
 
-    delay(3000);
+    delay(1000); // Wait 1 more second to total 3s before clearing
     lcd.clear();
     scrollLCD("Hold tag for 3s", "to scan item");
 
-    digitalWrite(BUZZER_PIN, LOW);
     mfrc522.PICC_HaltA();
 }
 
